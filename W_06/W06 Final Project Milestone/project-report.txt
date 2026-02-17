@@ -1,0 +1,14 @@
+Student Project Report
+
+=================================================
+            Time Spent
+   Date       (hours)   Description of Work
+----------  ----------  -------------------------
+2026-02-04      2.0     Interviewed store owner (my father) to define requirements and designed the initial inventory.csv structure.
+2026-02-09	2.5	Developed the core engine in core.py, including load_inventory and save_inventory functions using the csv module.
+2026-02-10	2.5	Wrote and debugged CRUD functions: update_stock, add_product, and delete_product to handle business logic.
+2026-02-11	3.0	Built the Graphical User Interface (GUI) in main.py using tkinter and integrated the number_entry.py module.
+2026-02-12	2.0	Implemented the 'High Priority Purchase Report' and 'Urgent Purchases' analytics for creativity points.
+2026-02-13	1.0	Finalized unit testing with pytest, ensuring all 5 test functions pass with at least two calls and two asserts per function.
+==================================================
+

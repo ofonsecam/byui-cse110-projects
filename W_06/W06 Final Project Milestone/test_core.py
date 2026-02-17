@@ -15,18 +15,20 @@ from core import (
 
 def test_update_stock_success():
     """update_stock: success case — adds or subtracts quantity correctly."""
-    inv = {"P001": ["Widget A", 50]}
+    inv = {"P001": ["Arroz", 50]}
     update_stock(inv, "P001", 10)
-    assert inv["P001"] == ["Widget A", 60]
+    assert inv["P001"] == ["Arroz", 60]
     update_stock(inv, "P001", -20)
-    assert inv["P001"] == ["Widget A", 40]
+    assert inv["P001"] == ["Arroz", 40]
 
 
 def test_update_stock_insufficient_stock():
     """update_stock: raises ValueError('Insufficient stock') when result would be negative."""
-    inv = {"P001": ["Widget A", 5]}
+    inv = {"P001": ["Arroz", 50], "P002": ["Leche", 45]}
     with pytest.raises(ValueError, match="Insufficient stock"):
-        update_stock(inv, "P001", -10)
+        update_stock(inv, "P001", -60)
+    with pytest.raises(ValueError, match="Insufficient stock"):
+        update_stock(inv, "P002", -50)
 
 
 # --- test_get_out_of_stock_requested ---
@@ -34,17 +36,20 @@ def test_update_stock_insufficient_stock():
 
 def test_get_out_of_stock_requested_returns_requested_and_zero():
     """get_out_of_stock_requested: returns names of products that are out of stock and requested."""
-    inv = {"P001": ["Widget A", 0], "P002": ["Widget B", 10]}
-    requested = ["P001", "P003"]
-    result = get_out_of_stock_requested(inv, requested)
-    assert result == ["Widget A"]
+    inv = {"P001": ["Arroz", 50], "P002": ["Leche", 45], "P004": ["Sal", 0]}
+    result1 = get_out_of_stock_requested(inv, ["P004"])
+    assert result1 == ["Sal"]
+    result2 = get_out_of_stock_requested(inv, ["P001", "P004"])
+    assert result2 == ["Sal"]
 
 
 def test_get_out_of_stock_requested_ignores_in_stock():
     """get_out_of_stock_requested: only products with quantity 0 are returned."""
-    inv = {"P001": ["Widget A", 5], "P002": ["Widget B", 0]}
-    result = get_out_of_stock_requested(inv, ["P001", "P002"])
-    assert result == ["Widget B"]
+    inv = {"P001": ["Arroz", 50], "P004": ["Sal", 0]}
+    result1 = get_out_of_stock_requested(inv, ["P001", "P004"])
+    assert result1 == ["Sal"]
+    result2 = get_out_of_stock_requested(inv, ["P004"])
+    assert result2 == ["Sal"]
 
 
 # --- test_load_inventory ---
@@ -52,18 +57,17 @@ def test_get_out_of_stock_requested_ignores_in_stock():
 
 def test_load_inventory():
     """load_inventory: builds dict from CSV with product_id as key and [name, quantity] as value."""
-    result = load_inventory("inventory.csv")
-    
-    # Check the IDs exist
-    assert "P001" in result
-    assert "P002" in result
-    assert "P003" in result
-    assert "P004" in result 
-
-    assert result["P001"] == ["Arroz", 50]
-    assert result["P002"] == ["Leche", 30]
-    assert result["P003"] == ["Milo", 25]
-    assert result["P004"] == ["Sal", 0]
+    result1 = load_inventory("inventory.csv")
+    result2 = load_inventory("inventory.csv")
+    expected = {
+        "P001": ["Arroz", 50],
+        "P002": ["Leche", 45],
+        "P003": ["Milo", 25],
+        "P004": ["Sal", 0],
+        "P005": ["Pan", 10],
+    }
+    assert result1 == expected
+    assert result2 == expected
 
 
 # --- test_add_product ---
@@ -74,8 +78,9 @@ def test_add_product():
     inv = {}
     add_product(inv, "P001", "Arroz", 50)
     assert inv["P001"] == ["Arroz", 50]
-    assert len(inv) == 1
-    # No duplicates allowed.
+    add_product(inv, "P002", "Leche", 45)
+    assert inv["P002"] == ["Leche", 45]
+    assert len(inv) == 2
     with pytest.raises(ValueError, match="Product ID already exists"):
         add_product(inv, "P001", "Otro", 10)
 
@@ -85,10 +90,11 @@ def test_add_product():
 
 def test_delete_product():
     """delete_product: product is removed from dict; missing product_id raises KeyError."""
-    inv = {"P001": ["Arroz", 50], "P002": ["Leche", 30]}
+    inv = {"P001": ["Arroz", 50], "P002": ["Leche", 45], "P003": ["Milo", 25]}
+    delete_product(inv, "P001")
+    assert "P001" not in inv
     delete_product(inv, "P002")
     assert "P002" not in inv
-    assert inv["P001"] == ["Arroz", 50]
-    # Error when ID does not exist.
+    assert inv["P003"] == ["Milo", 25]
     with pytest.raises(KeyError, match="Product not found"):
         delete_product(inv, "P999")
