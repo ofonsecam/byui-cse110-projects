@@ -7,7 +7,7 @@ import axios from 'axios'
 import { getStoredToken, clearSession } from './lib/authStorage'
 
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000',
+  baseURL: 'https://fons-inventory-backend.onrender.com', 
   timeout: 15000,
   headers: { 'Content-Type': 'application/json' },
 })
