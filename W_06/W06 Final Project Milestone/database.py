@@ -5,7 +5,7 @@ Incluye validación de JWT de Supabase Auth para proteger endpoints.
 """
 import os
 import jwt
-from jwt import PyJWKClient # Cliente para bajar llaves de internet
+from jwt import PyJWKClient
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy import create_engine, Column, Integer, String
@@ -36,66 +36,55 @@ class Product(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# --- VALIDACIÓN DE TOKENS HÍBRIDA (HS256 + ES256) ---
+# --- VALIDACIÓN DE TOKENS ---
 
 def get_session():
     return SessionLocal()
 
 def validate_jwt(token: str):
     """
-    Valida el token intentando primero la llave pública (ES256/RS256) 
-    y luego el secreto (HS256) como respaldo.
+    Valida el token usando JWKS (llaves públicas de Supabase).
+    Soporta ES256 (Nuevos proyectos) y RS256.
     """
     try:
-        # 1. Intentar método moderno (ES256/RS256) usando JWKS de Supabase
-        supabase_url = os.getenv("SUPABASE_URL") # Asegúrate que esta variable esté en Render
-        if supabase_url:
-            try:
-                # Construimos la URL donde Supabase publica sus llaves
-                jwks_url = f"{supabase_url}/.well-known/jwks.json"
-                jwks_client = PyJWKClient(jwks_url)
-                signing_key = jwks_client.get_signing_key_from_jwt(token)
-                
-                payload = jwt.decode(
-                    token,
-                    signing_key.key,
-                    algorithms=["ES256", "RS256"],
-                    audience="authenticated",
-                    options={"verify_aud": False}
-                )
-                print("[AUTH SUCCESS] Token validado con JWKS (ES256/RS256)")
-                return payload
-            except Exception as e_jwks:
-                # Si falla JWKS, no nos rendimos, probamos el método antiguo abajo
-                print(f"[AUTH INFO] Falló validación JWKS: {e_jwks}. Intentando HS256...")
+        supabase_url = os.getenv("SUPABASE_URL")
+        if not supabase_url:
+            print("[AUTH ERROR] SUPABASE_URL no configurada en Render.")
+            return None
 
-        # 2. Intentar método clásico (HS256) con JWT_SECRET
-        secret = os.getenv("JWT_SECRET")
-        if secret:
+        # --- CORRECCIÓN CRÍTICA: La ruta correcta incluye /auth/v1 ---
+        # Limpiamos la URL base por si tiene slash al final
+        base_url = supabase_url.rstrip("/")
+        jwks_url = f"{base_url}/auth/v1/.well-known/jwks.json"
+
+        try:
+            jwks_client = PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            
             payload = jwt.decode(
-                token, 
-                secret, 
-                algorithms=["HS256"], 
+                token,
+                signing_key.key,
+                algorithms=["ES256", "RS256"],
                 audience="authenticated",
-                options={"verify_aud": False} 
+                options={"verify_aud": False}
             )
-            print("[AUTH SUCCESS] Token validado con Secreto (HS256)")
+            # print("[AUTH SUCCESS] Token validado correctamente via JWKS") # Comentado para limpiar logs
             return payload
             
-        print("[AUTH ERROR] No se pudo validar el token con ningún método.")
-        return None
+        except Exception as e_jwks:
+            print(f"[AUTH ERROR] Falló JWKS en {jwks_url}: {e_jwks}")
+            # Si falla JWKS con ES256, el método HS256 no servirá de nada, 
+            # así que retornamos None directamente para ver el error real.
+            return None
 
     except jwt.ExpiredSignatureError:
         print("[AUTH ERROR] El token ha expirado.")
         return None
-    except jwt.InvalidSignatureError:
-        print("[AUTH ERROR] La firma no es válida.")
-        return None
     except Exception as e:
-        print(f"[AUTH CRITICAL] Error inesperado validando token: {e}")
+        print(f"[AUTH CRITICAL] Error inesperado: {e}")
         return None
 
-# --- FUNCIONES CRUD (Sin cambios) ---
+# --- FUNCIONES CRUD ---
 def create_product(session, name: str, quantity: int):
     last_product = session.query(Product).order_by(Product.id.desc()).first()
     if last_product and last_product.product_id.startswith("P"):
