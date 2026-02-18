@@ -37,7 +37,9 @@ class Product(Base):
     name = Column(String, index=True)
     quantity = Column(Integer, default=0)
 
-# Crear tablas si no existen
+# --- REINICIO DE BASE DE DATOS (SOLO UNA VEZ) ---
+# Esto borra la tabla vieja corrupta y crea la nueva correcta
+Base.metadata.drop_all(bind=engine) 
 Base.metadata.create_all(bind=engine)
 
 # --- FUNCIONES DE BASE DE DATOS ---
