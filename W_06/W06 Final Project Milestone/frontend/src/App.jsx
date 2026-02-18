@@ -17,7 +17,7 @@ function App() {
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-slate-600">Cargando…</p>
+        <p className="text-slate-600">Cargando...</p>
       </div>
     )
   }
@@ -35,8 +35,11 @@ function InventoryApp({ user, onLogout }) {
   const [productos, setProductos] = useState([])
   const [productosLoading, setProductosLoading] = useState(true)
   const [productosError, setProductosError] = useState(null)
+  
+  // UI States (usan product_id string para las keys de React)
   const [editingQuantity, setEditingQuantity] = useState({})
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null)
+  
   const [updateError, setUpdateError] = useState(null)
   const [modalAgregarOpen, setModalAgregarOpen] = useState(false)
   const [formNombre, setFormNombre] = useState('')
@@ -45,7 +48,6 @@ function InventoryApp({ user, onLogout }) {
   const [addLoading, setAddLoading] = useState(false)
   const [successMessage, setSuccessMessage] = useState(null)
 
-  // FUNCIÓN NUEVA: Controla manualmente la petición a Gemini para ahorrar cuota
   const solicitarAnalisisIA = () => {
     setConsejoLoading(true)
     setConsejoError(null)
@@ -71,38 +73,53 @@ function InventoryApp({ user, onLogout }) {
       .finally(() => setProductosLoading(false))
   }, [])
 
-  const handleQuantityBlur = (productId, inputValue) => {
+  // --- CORRECCIÓN 1: Recibimos el objeto producto completo 'p' ---
+  const handleQuantityBlur = (p, inputValue) => {
     const n = parseInt(String(inputValue).trim(), 10)
     if (isNaN(n) || n < 0) return
     
+    // UI State: Limpiamos usando el ID de texto (P00X)
     setEditingQuantity((prev) => {
       const next = { ...prev }
-      delete next[productId]
+      delete next[p.product_id]
       return next
     })
     
     setUpdateError(null)
-    actualizarProducto(productId, { cantidad: n })
+
+    // API Call: Usamos el ID NUMÉRICO (p.id) que es lo que espera el Backend
+    console.log(`Actualizando ID: ${p.id} (Ref: ${p.product_id}) a cantidad: ${n}`)
+    
+    actualizarProducto(p.id, { cantidad: n })
       .then(() => {
+        // UI Update: Buscamos por product_id para consistencia visual
         setProductos((prev) =>
-          prev.map((p) =>
-            p.product_id === productId ? { ...p, quantity: n } : p
+          prev.map((prod) =>
+            prod.product_id === p.product_id ? { ...prod, quantity: n } : prod
           )
         )
       })
       .catch((err) => {
+        console.error(err)
         setUpdateError(err.message || 'Error al actualizar')
       })
   }
 
-  const handleDeleteConfirm = (productId) => {
+  // --- CORRECCIÓN 2: Recibimos el objeto producto completo 'p' ---
+  const handleDeleteConfirm = (p) => {
     setUpdateError(null)
-    eliminarProducto(productId)
+    
+    // API Call: Usamos el ID NUMÉRICO (p.id)
+    console.log(`Eliminando ID: ${p.id} (Ref: ${p.product_id})`)
+
+    eliminarProducto(p.id)
       .then(() => {
-        setProductos((prev) => prev.filter((p) => p.product_id !== productId))
+        // UI Update: Filtramos por product_id
+        setProductos((prev) => prev.filter((prod) => prod.product_id !== p.product_id))
         setConfirmingDeleteId(null)
       })
       .catch((err) => {
+        console.error(err)
         setUpdateError(err.message || 'Error al eliminar')
       })
   }
@@ -143,7 +160,7 @@ function InventoryApp({ user, onLogout }) {
         setFormCantidad('')
         setSuccessMessage('Producto agregado con éxito.')
         setTimeout(() => setSuccessMessage(null), 4000)
-        return getProductos() // AUDITORÍA: Ya NO llamamos a getAnalizarInventario aquí automáticamente
+        return getProductos() 
       })
       .then((list) => {
         setProductos(Array.isArray(list) ? list : [])
@@ -173,7 +190,6 @@ function InventoryApp({ user, onLogout }) {
       )}
 
       <main className="max-w-4xl mx-auto px-4 pt-6 space-y-6">
-        {/* SECCIÓN IA OPTIMIZADA */}
         <section className="rounded-xl p-5 shadow-lg border-2 border-amber-400 bg-white text-slate-900">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
             <h2 className="text-base font-bold flex items-center gap-2 text-amber-600">
@@ -229,7 +245,8 @@ function InventoryApp({ user, onLogout }) {
                         min={0}
                         value={displayQty}
                         onChange={(e) => setEditingQuantity((prev) => ({ ...prev, [p.product_id]: e.target.value }))}
-                        onBlur={(e) => handleQuantityBlur(p.product_id, e.target.value)}
+                        // CORRECCIÓN: Pasamos 'p' (objeto completo) en vez de 'p.product_id'
+                        onBlur={(e) => handleQuantityBlur(p, e.target.value)}
                         className={`w-full min-h-[48px] text-lg font-bold rounded-lg border-2 px-3 ${isZero ? 'border-red-400 text-red-600 bg-red-50' : 'border-slate-300 text-slate-700'}`}
                       />
                     </div>
@@ -242,7 +259,8 @@ function InventoryApp({ user, onLogout }) {
                     <p className="text-slate-700 font-medium text-sm text-center">¿Eliminar producto?</p>
                     <div className="flex gap-2">
                       <button onClick={() => setConfirmingDeleteId(null)} className="flex-1 py-2 rounded-lg border-2 border-slate-300 bg-slate-100 text-sm">No</button>
-                      <button onClick={() => handleDeleteConfirm(p.product_id)} className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-bold">Sí</button>
+                      {/* CORRECCIÓN: Pasamos 'p' (objeto completo) */}
+                      <button onClick={() => handleDeleteConfirm(p)} className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-bold">Sí</button>
                     </div>
                   </div>
                 )}
