@@ -3,86 +3,99 @@ Configuración de conexión a la base de datos (Supabase/PostgreSQL) con SQLAlch
 Requiere DATABASE_URL en el entorno (cargar .env antes de importar).
 Incluye validación de JWT de Supabase Auth para proteger endpoints.
 """
-
 import os
-from pathlib import Path
-
 import jwt
-import requests
-from jwt import PyJWKClient
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from pathlib import Path
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.orm import sessionmaker, declarative_base
 
+# Cargar variables de entorno
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL or not DATABASE_URL.strip():
-    raise ValueError("DATABASE_URL no está definida en el entorno (.env)")
+# Configuración de la Base de Datos
+DB_URL = os.getenv("DB_URL")
+if not DB_URL:
+    raise ValueError("DB_URL no está configurada en el archivo .env")
 
-# Supabase puede devolver postgres://; psycopg2 requiere postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Corrección para Render (Postgres requiere postgresql://)
+if DB_URL.startswith("postgres://"):
+    DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,
-    echo=False,
-)
-
+engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-SUPABASE_URL = "https://prtxahssrpalfhnhuxkj.supabase.co"
+# --- MODELO DE PRODUCTO ---
+class Product(Base):
+    __tablename__ = "products"
+    
+    # id es la llave primaria NUMÉRICA (1, 2, 3...)
+    id = Column(Integer, primary_key=True, index=True)
+    # product_id es el código de texto (P001, P002...)
+    product_id = Column(String, unique=True, index=True)
+    name = Column(String, index=True)
+    quantity = Column(Integer, default=0)
 
+# Crear tablas si no existen
+Base.metadata.create_all(bind=engine)
 
-def get_db() -> Session:
-    """Generador de sesión para uso en endpoints o scripts. Cerrar con session.close()."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# --- FUNCIONES DE BASE DE DATOS ---
 
-
-def get_session() -> Session:
-    """Devuelve una sesión activa. El llamador debe hacer session.close() al terminar."""
+def get_session():
+    """Devuelve una nueva sesión de base de datos."""
     return SessionLocal()
 
-
-def get_product_by_id(session: Session, id: int):
-    """Devuelve el producto por PK id o None si no existe."""
-    from models import Product
-    return session.get(Product, id)
-
-
-def create_product(session: Session, name: str, quantity: int):
+def validate_jwt(token: str):
     """
-    Crea un producto en public.products. Genera product_id único.
-    Hace commit. Devuelve el Product creado.
+    Decodifica el JWT de Supabase para obtener el usuario.
+    Retorna el payload (dict) o None si es inválido.
     """
-    import uuid
-    from models import Product
-    product_id = "P" + uuid.uuid4().hex[:10].upper()
-    product = Product(product_id=product_id, name=name.strip(), quantity=quantity)
-    session.add(product)
+    try:
+        secret = os.getenv("JWT_SECRET")
+        if not secret:
+            # Si no hay secreto configurado, asumimos modo desarrollo inseguro o fallamos
+            print("[AUTH] Advertencia: JWT_SECRET no configurado.")
+            return None
+            
+        # Supabase usa HS256 por defecto
+        payload = jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
+        return payload
+    except Exception as e:
+        print(f"[AUTH ERROR] {e}")
+        return None
+
+def create_product(session, name: str, quantity: int):
+    """
+    Crea un producto nuevo. Genera automáticamente el código P00X.
+    """
+    # 1. Buscar el último ID para generar el siguiente código
+    last_product = session.query(Product).order_by(Product.id.desc()).first()
+    if last_product and last_product.product_id.startswith("P"):
+        try:
+            last_num = int(last_product.product_id[1:])
+            new_id_str = f"P{last_num + 1:03d}"
+        except ValueError:
+            new_id_str = "P001"
+    else:
+        new_id_str = "P001"
+        
+    new_product = Product(product_id=new_id_str, name=name, quantity=quantity)
+    session.add(new_product)
     session.commit()
-    session.refresh(product)
-    return product
+    session.refresh(new_product)
+    return new_product
 
-
-def update_product(session, product_id_str, name=None, quantity=None):
-    # AUDITORÍA: Importamos el modelo aquí dentro para evitar el error "Product is not defined"
-    from models import Product 
-    
-    # Buscamos explícitamente en la columna 'product_id' (el código de texto "P001")
-    # en lugar de la llave primaria numérica (id)
-    product = session.query(Product).filter(Product.product_id == product_id_str).first()
+def update_product(session, id_interno: int, name: str = None, quantity: int = None):
+    """
+    Actualiza un producto buscando por su ID NUMÉRICO (Primary Key).
+    """
+    # AQUI ESTABA EL ERROR: Buscamos por Product.id (número), NO por Product.product_id
+    product = session.query(Product).filter(Product.id == id_interno).first()
     
     if not product:
         return None
         
-    # Actualizamos solo los campos que no sean None
     if name is not None:
         product.name = name
     if quantity is not None:
@@ -92,37 +105,15 @@ def update_product(session, product_id_str, name=None, quantity=None):
     session.refresh(product)
     return product
 
-
-def delete_product(session: Session, id: int) -> bool:
-    """Elimina el producto con PK id. Devuelve True si existía y se eliminó."""
-    from models import Product
-    product = session.get(Product, id)
+def delete_product(session, id_interno: int):
+    """
+    Elimina un producto buscando por su ID NUMÉRICO.
+    """
+    product = session.query(Product).filter(Product.id == id_interno).first()
+    
     if not product:
         return False
+        
     session.delete(product)
     session.commit()
     return True
-
-
-def validate_jwt(access_token: str) -> dict | None:
-    """
-    Valida el JWT emitido por Supabase Auth usando JWKS del proyecto (llave pública desde la URL).
-    Returns:
-        Payload del token con sub, email, etc. si es válido; None si falla.
-    """
-    try:
-        jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-        jwks_client = PyJWKClient(jwks_url)
-        signing_key = jwks_client.get_signing_key_from_jwt(access_token)
-
-        payload = jwt.decode(
-            access_token.strip(),
-            signing_key.key,
-            algorithms=["HS256", "ES256"],
-            audience="authenticated"
-        )
-        return payload
-    except Exception as e:
-        print(f"ERROR DE SEGURIDAD: {str(e)}")
-        return None
-        
