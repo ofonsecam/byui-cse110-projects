@@ -4,45 +4,38 @@ Lee el inventario desde la base de datos (Supabase).
 Si la API falla, devuelve un consejo por defecto basado en reglas simples.
 """
 
+import os
+from typing import TypedDict, List
 from dotenv import load_dotenv
 from pathlib import Path
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
-
-import os
-from typing import TypedDict
-
-from google import genai
+# --- CORRECCIÓN CLAVE: Usamos la librería estándar instalada ---
+import google.generativeai as genai
 
 from database import get_session
 from models import Product
 
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
-# Modelos del diagnóstico (prioridad: gemini-1.5-flash si existiera; luego los que sí aparecieron)
+# Modelos soportados por la librería estable
+# Usamos gemini-pro como principal por estabilidad, y flash como backup
 MODELOS_GEMINI = [
-    "models/gemini-1.5-flash",
-    "models/gemini-2.0-flash",
-    "models/gemini-2.5-flash",
-    "models/gemini-flash-latest",
-    "models/gemini-pro-latest",
+    "gemini-pro",
+    "gemini-1.5-flash"
 ]
 
 # Umbral bajo para considerar "poco stock"
 UMBRAL_STOCK_BAJO = 10
 
-
-class Producto(TypedDict):
-    """Representa un producto del inventario."""
-
+class ProductoDict(TypedDict):
+    """Representa un producto del inventario como diccionario."""
     product_id: str
     product_name: str
     quantity: int
 
-
-def _obtener_productos_desde_db() -> list[Producto]:
+def _obtener_productos_desde_db() -> List[ProductoDict]:
     """
     Abre una sesión nueva, consulta la tabla products y devuelve los datos actuales.
-    Sin caché: cada llamada lee de Supabase.
     """
     session = get_session()
     try:
@@ -56,79 +49,89 @@ def _obtener_productos_desde_db() -> list[Producto]:
             for p in rows
         ]
         return productos
+    except Exception as e:
+        print(f"[DB Error] Al leer productos: {e}")
+        return []
     finally:
         session.close()
 
-
-def _consejo_por_defecto(productos: list[Producto]) -> str:
+def _consejo_por_defecto(productos: List[ProductoDict]) -> str:
     """
     Genera un consejo simple basado en reglas (sin IA) para no romper la app.
     """
+    if not productos:
+        return "No hay productos registrados en la base de datos para analizar."
+
     en_cero = [p for p in productos if p["quantity"] == 0]
     bajos = [p for p in productos if 0 < p["quantity"] <= UMBRAL_STOCK_BAJO]
 
-    partes: list[str] = []
+    partes: List[str] = []
     if en_cero:
-        nombres = ", ".join(p["product_name"] for p in en_cero)
-        partes.append(f"Stock en cero: {nombres}. Reabastecer pronto.")
+        nombres = ", ".join(p["product_name"] for p in en_cero[:3])
+        if len(en_cero) > 3: nombres += "..."
+        partes.append(f"URGENTE: {nombres} están en cero.")
+    
     if bajos:
         nombres = ", ".join(p["product_name"] for p in bajos[:3])
-        if len(bajos) > 3:
-            nombres += f" y {len(bajos) - 3} más"
-        partes.append(f"Poco stock (≤{UMBRAL_STOCK_BAJO}): {nombres}. Considera pedir más.")
+        partes.append(f"Poco stock: {nombres}.")
+        
     if not partes:
-        return "El inventario está en niveles normales. Revisa de nuevo en unos días."
+        return "El inventario se ve saludable. ¡Buen trabajo manteniendo el stock!"
 
-    return " ".join(partes)
+    return " ".join(partes) + " Revisa tu inventario completo."
 
-
-def _formatear_inventario(productos: list[Producto]) -> str:
+def _formatear_inventario(productos: List[ProductoDict]) -> str:
     """Formatea la lista de productos para el prompt de Gemini."""
     return "\n".join(
-        f"- {p['product_name']} (id: {p['product_id']}): {p['quantity']} unidades"
+        f"- {p['product_name']} (ID: {p['product_id']}): {p['quantity']} unid."
         for p in productos
     )
 
-
 def generar_consejo_inventario() -> str:
     """
-    Analiza el inventario (desde la base de datos) con Gemini y devuelve un consejo.
-    Si la API falla, devuelve un consejo por defecto basado en reglas simples.
+    Analiza el inventario con Gemini.
     """
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key or not api_key.strip():
-        raise ValueError(
-            "GEMINI_API_KEY no está definida. Configúrala en el archivo .env"
-        )
+    if not api_key:
+        print("[Error] Falta GEMINI_API_KEY")
+        # Devolvemos fallback, pero necesitamos leer la DB primero para que tenga sentido
+        productos = _obtener_productos_desde_db()
+        return _consejo_por_defecto(productos)
 
-    # Consulta fresca a la DB justo antes de enviar a Gemini (sin usar CSV ni caché)
+    # 1. Obtener datos frescos
     productos = _obtener_productos_desde_db()
-    print("[ai_service] Productos leidos de la DB:", productos)  # noqa: T201
+    if not productos:
+        return "El inventario está vacío, agrega productos primero."
 
-    prompt = f"""Eres un asesor de inventario para una tienda de barrio. 
-Analiza este inventario y da UN solo consejo breve y práctico para el dueño (por ejemplo: qué reponer, qué producto tiene alta rotación, qué está por acabarse).
-Sé directo, en español y en tono cercano (como para "mi papá").
+    # 2. Preparar Prompt
+    texto_inventario = _formatear_inventario(productos)
+    prompt = f"""
+    Actúa como un experto en logística de tiendas minoristas.
+    Analiza el siguiente inventario y dame UN SOLO consejo breve, práctico y directo para el dueño.
+    Usa un tono amable pero profesional. No uses listas, solo un párrafo corto (máximo 2 oraciones).
+    Si ves productos en 0, priorízalos.
+    
+    INVENTARIO:
+    {texto_inventario}
+    """
 
-Inventario (product_id, product_name, quantity):
-{_formatear_inventario(productos)}
+    # 3. Configurar IA (Sintaxis de librería Estable)
+    genai.configure(api_key=api_key)
 
-Responde solo con el consejo, sin títulos ni explicaciones extra."""
+    # 4. Intentar generar respuesta
+    for modelo in MODELOS_GEMINI:
+        try:
+            print(f"[IA] Intentando con modelo: {modelo}")
+            model_instance = genai.GenerativeModel(modelo)
+            response = model_instance.generate_content(prompt)
+            
+            if response.text:
+                return response.text.strip()
+                
+        except Exception as e:
+            print(f"[IA Error] Falló {modelo}: {e}")
+            continue # Intenta el siguiente modelo
 
-    try:
-        client = genai.Client(api_key=api_key)
-        for model_name in MODELOS_GEMINI:
-            try:
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                if response.text and response.text.strip():
-                    return response.text.strip()
-            except Exception as e:
-                print(f"[Gemini] Error con modelo '{model_name}': {e!s}")  # noqa: T201
-                continue
-    except Exception as e:
-        print(f"[Gemini] Error de cliente: {e!s}")  # noqa: T201
-
-    # Fallback robusto: consejo por reglas para que la app no se rompa
+    # 5. Si todo falla, usar fallback
+    print("[IA] Todos los modelos fallaron, usando reglas manuales.")
     return _consejo_por_defecto(productos)
