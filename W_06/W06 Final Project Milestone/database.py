@@ -4,7 +4,7 @@ Requiere DATABASE_URL en el entorno (cargar .env antes de importar).
 Incluye validación de JWT de Supabase Auth para proteger endpoints.
 """
 import os
-import jwt  # Esta es la librería PyJWT
+import jwt
 from dotenv import load_dotenv
 from pathlib import Path
 from sqlalchemy import create_engine, Column, Integer, String
@@ -16,11 +16,10 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 # Configuración de la Base de Datos
 DB_URL = os.getenv("DB_URL")
 if not DB_URL:
-    # Fallback por si la variable no carga, evita crash inmediato
     print("ADVERTENCIA: DB_URL no encontrada, usando sqlite local por defecto")
     DB_URL = "sqlite:///./inventory.db"
 
-# Corrección para Render (Postgres requiere postgresql://)
+# Corrección para Render
 if DB_URL.startswith("postgres://"):
     DB_URL = DB_URL.replace("postgres://", "postgresql://", 1)
 
@@ -37,18 +36,16 @@ class Product(Base):
     name = Column(String, index=True)
     quantity = Column(Integer, default=0)
 
-# Crear tablas (Sin drop_all para seguridad en producción)
 Base.metadata.create_all(bind=engine)
 
 # --- FUNCIONES DE BASE DE DATOS ---
 
 def get_session():
-    """Devuelve una nueva sesión de base de datos."""
     return SessionLocal()
 
 def validate_jwt(token: str):
     """
-    Decodifica el JWT de Supabase con diagnóstico avanzado.
+    Decodifica el JWT de Supabase aceptando múltiples algoritmos (HS256, RS256, ES256).
     """
     try:
         secret = os.getenv("JWT_SECRET")
@@ -56,8 +53,7 @@ def validate_jwt(token: str):
             print("[AUTH ERROR] JWT_SECRET no está configurado en Render.")
             return None
             
-        # 1. DIAGNÓSTICO: Leer el encabezado del token sin verificar firma
-        # Esto nos dirá qué algoritmo está usando Supabase realmente.
+        # 1. DIAGNÓSTICO
         try:
             header = jwt.get_unverified_header(token)
             algoritmo_recibido = header.get('alg')
@@ -66,13 +62,11 @@ def validate_jwt(token: str):
             print(f"[AUTH ERROR] Token corrupto o ilegible: {e}")
             return None
 
-        # 2. DECODIFICACIÓN TOLERANTE
-        # Permitimos HS256 (Defecto) y RS256 (Configuraciones avanzadas)
-        # Nota: options={"verify_aud": False} ayuda si la audiencia no coincide exactamente.
+        # 2. DECODIFICACIÓN (Agregamos ES256 a la lista)
         payload = jwt.decode(
             token, 
             secret, 
-            algorithms=["HS256", "RS256"], 
+            algorithms=["HS256", "RS256", "ES256"],  # <-- ¡AQUÍ AGREGAMOS ES256!
             audience="authenticated",
             options={"verify_aud": False} 
         )
@@ -82,14 +76,13 @@ def validate_jwt(token: str):
         print("[AUTH ERROR] El token ha expirado.")
         return None
     except jwt.InvalidSignatureError:
-        print("[AUTH ERROR] La firma del token no coincide con el JWT_SECRET.")
+        print("[AUTH ERROR] La firma del token no coincide.")
         return None
     except Exception as e:
         print(f"[AUTH CRITICAL ERROR] {e}")
         return None
 
 def create_product(session, name: str, quantity: int):
-    # Generar ID P00X basado en el último registro
     last_product = session.query(Product).order_by(Product.id.desc()).first()
     if last_product and last_product.product_id.startswith("P"):
         try:
@@ -107,7 +100,6 @@ def create_product(session, name: str, quantity: int):
     return new_product
 
 def update_product(session, id_interno: int, name: str = None, quantity: int = None):
-    # Buscar por ID numérico
     product = session.query(Product).filter(Product.id == id_interno).first()
     if not product:
         return None
@@ -120,7 +112,6 @@ def update_product(session, id_interno: int, name: str = None, quantity: int = N
     return product
 
 def delete_product(session, id_interno: int):
-    # Borrar por ID numérico
     product = session.query(Product).filter(Product.id == id_interno).first()
     if not product:
         return False
