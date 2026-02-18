@@ -1,13 +1,12 @@
 """
-W06 Final Project Milestone - Fons Inventory Management System
-Creativity Enhancement:
-I implemented a 'High Priority Purchase Report'. This feature cross-references
-items with zero stock against a customer 'wishlist' to help the shop owner
-(my father) prioritize which items to restock first based on actual demand.
+W06 Final Project Milestone - Fons Inventory Management System (LOCAL / OFFLINE VERSION)
+Note: This application runs locally using 'inventory.csv'. 
+It does NOT sync with the Web/Cloud version deployed on Vercel.
 """
 import tkinter as tk
 from tkinter import Frame, Label, Button, Entry, messagebox
-from number_entry import IntEntry
+# Asegúrate de tener este archivo number_entry.py en tu carpeta local
+from number_entry import IntEntry 
 from core import (
     load_inventory,
     update_stock,
@@ -25,7 +24,7 @@ lista_deseos = ["P002", "P004"]
 def main():
     root = tk.Tk()
     frm_main = Frame(root)
-    frm_main.master.title("Fons Inventory Management System")
+    frm_main.master.title("Fons Inventory (Local Offline)")
     frm_main.pack(padx=8, pady=6, fill=tk.BOTH, expand=1)
     inventory = load_inventory(INVENTORY_FILE)
     populate_main_window(frm_main, inventory)
@@ -72,7 +71,6 @@ def populate_main_window(frm_main, inventory):
     lbl_status.grid(row=8, column=0, columnspan=2, padx=4, pady=4, sticky="ew")
 
     def clear_fields_and_status():
-        """Clear all inputs and result; reset status text."""
         ent_product_id.clear()
         ent_name.delete(0, tk.END)
         ent_change.clear()
@@ -80,7 +78,6 @@ def populate_main_window(frm_main, inventory):
         lbl_status.config(text="", fg="gray")
 
     def set_success(msg):
-        """Show success message in lbl_status (green)."""
         clear_fields_and_status()
         lbl_status.config(text=msg, fg="green")
 
@@ -106,18 +103,17 @@ def populate_main_window(frm_main, inventory):
             lbl_status.config(text=str(e), fg="red")
 
     def do_add():
-        """Register new product: ID (P prefix), name, quantity → add_product → save_inventory."""
         lbl_status.config(fg="gray")
         lbl_result.config(text="")
         try:
             product_id_num = ent_product_id.get()
             quantity = ent_change.get()
         except ValueError:
-            lbl_status.config(text="Revisa ID y Cantidad (número válido).", fg="red")
+            lbl_status.config(text="Revisa ID y Cantidad.", fg="red")
             return
         name = ent_name.get().strip()
         if not name:
-            lbl_status.config(text="Escribe el nombre del producto.", fg="red")
+            lbl_status.config(text="Escribe el nombre.", fg="red")
             return
         product_id = f"P{product_id_num:03d}"
         try:
@@ -128,7 +124,6 @@ def populate_main_window(frm_main, inventory):
             lbl_status.config(text=str(e), fg="red")
 
     def do_delete():
-        """Remove product by ID: delete_product → save_inventory."""
         lbl_status.config(fg="gray")
         lbl_result.config(text="")
         try:
@@ -151,24 +146,12 @@ def populate_main_window(frm_main, inventory):
 
     def show_missing_report():
         urgentes = get_out_of_stock_requested(inventory, pedidos_clientes)
-        if urgentes:
-            msg = f"Productos urgentes por comprar: {', '.join(urgentes)}"
-        else:
-            msg = "Todo el stock solicitado está al día"
-        win = tk.Toplevel(frm_main.winfo_toplevel())
-        win.title("Reporte de Faltantes Pedidos")
-        win.geometry("420x80")
-        Label(win, text=msg, wraplength=380, justify=tk.LEFT, padx=10, pady=10).pack(
-            anchor="w", fill=tk.BOTH, expand=True
-        )
-        Button(win, text="Cerrar", command=win.destroy).pack(pady=(0, 10))
+        msg = f"Productos urgentes: {', '.join(urgentes)}" if urgentes else "Stock al día"
+        messagebox.showinfo("Reporte Faltantes", msg)
 
     def show_urgent_purchases():
         faltantes = get_out_of_stock_requested(inventory, lista_deseos)
-        if faltantes:
-            msg = f"Productos agotados de la lista de deseos: {', '.join(faltantes)}"
-        else:
-            msg = "Inventario al día"
+        msg = f"Lista de deseos agotada: {', '.join(faltantes)}" if faltantes else "Inventario al día"
         messagebox.showinfo("Compras Urgentes", msg)
 
     btn_update.config(command=do_update)
@@ -178,7 +161,6 @@ def populate_main_window(frm_main, inventory):
     btn_report.config(command=show_missing_report)
     btn_urgent.config(command=show_urgent_purchases)
     ent_product_id.focus()
-
 
 if __name__ == "__main__":
     main()
